@@ -1,7 +1,9 @@
 #include <gpiod.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define MIN_PINS (1)

@@ -3,6 +3,10 @@
 int num_pins = 0;
 int pins[TOTAL_PINS] = {0};
 
+static volatile sig_atomic_t interrupt = 0;
+
+static void signal_received(int signo) { interrupt = 1; }
+
 void *toggle_pin(void *vargp) {
   for (;;) {
     pin_state *ps = (pin_state *)vargp;
@@ -10,14 +14,14 @@ void *toggle_pin(void *vargp) {
                             (gpiod_ctxless_set_value_cb)sleep_for_ms,
                             (void *)ps);
 
-    printf("pin %d OFF\n", ps->pin);
+    printf("pin %d OFF (%d μs)\n", ps->pin, ps->sleep);
     usleep(ps->sleep);
   }
 }
 
 int sleep_for_ms(void *vargp) {
   pin_state *ps = (pin_state *)vargp;
-  printf("pin %d ON\n", ps->pin);
+  printf("pin %d ON (%d μs)\n", ps->pin, ps->sleep);
 
   return usleep(ps->sleep);
 }
@@ -45,16 +49,24 @@ void get_user_input() {
           if (IS_VALID_GPIO(pin)) {
             pins[i] = pin;
             break;
-          } else {
-            printf("%d is not a valid GPIO pin\n", pin);
           }
         }
       }
+      printf("%d is not a valid GPIO pin\n", pin);
     }
   }
 }
 
 int main(int argc, char **argv) {
+  struct sigaction sa;
+
+  memset(&sa, 0, sizeof(struct sigaction));
+  sa.sa_handler = &signal_received;
+  if (sigaction(SIGINT, &sa, NULL) == -1) {
+    perror("sigaction");
+    exit(1);
+  }
+
   srand(time(0));
 
   get_user_input();
@@ -68,11 +80,20 @@ int main(int argc, char **argv) {
     pthread_create(&ps[i].thread, NULL, toggle_pin, (void *)&ps[i]);
   }
 
-  for (int i = 0; i < num_pins; ++i) {
-    pthread_join(ps[i].thread, NULL);
-  }
+  for (;;) {
+    if (interrupt) {
+      interrupt = 0;
+      printf("\nReceived an interrupt\n");
+      printf("Cancelling %d threads...\n", num_pins);
 
-  printf("DONE\n");
+      for (int i = 0; i < num_pins; ++i) {
+        pthread_cancel(ps[i].thread);
+      }
+      printf("DONE\n");
+      exit(0);
+    }
+    sleep(1);
+  }
 
   return 0;
 }
